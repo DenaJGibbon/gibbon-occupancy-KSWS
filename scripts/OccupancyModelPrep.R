@@ -3,11 +3,11 @@ library(tidyr)
 library(bbmle)
 
 # Subset data to extract non-detections (Common.Name == 'nocall' or Confidence < 0.95)
-KSWSFilesCombinedNoDetect <- subset(KSWSFilesCombined, Common.Name == 'nocall' | Confidence < 0.98)
+KSWSFilesCombinedNoDetect <- subset(KSWSFilesCombined, Common.Name == 'nocall' | Confidence < 0.99)
 head(KSWSFilesCombinedNoDetect)
 
 # Subset data to extract detections (Common.Name != 'nocall' and Confidence >= 0.95)
-KSWSFilesCombinedDetect <- subset(KSWSFilesCombined, Common.Name != 'nocall' & Confidence >=  0.98)
+KSWSFilesCombinedDetect <- subset(KSWSFilesCombined, Common.Name != 'nocall' & Confidence >=  0.99)
 
 # Add a new column 'Detect' with binary values (0 for no detection, 1 for detection)
 KSWSFilesCombinedNoDetect$Detect <- '0'
@@ -98,6 +98,7 @@ occ_model <- occu(~1 ~ Habitat.type, data = umf)
 
 # View the model output
 summary(occ_model)
+plot(occ_model)
 
 # Fit the null model (no covariates for both detection and occupancy)
 null_model <- occu(~1 ~1, data = umf)
@@ -112,4 +113,16 @@ fl
 
 ms <- modSel(fl, nullmod="Null")
 ms
+
+# Extract predicted occupancy probabilities from your model
+predictions <- predict(occ_model, type = "state")  # Occupancy probabilities
+predictions <- cbind.data.frame(predictions,siteCovs)
+
+# Plot the occupancy probabilities for each habitat type
+
+ggplot(predictions, aes(x = Habitat.type, y = Predicted )) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Habitat Type", y = "Estimated Occupancy Probability") +
+  theme_minimal() +
+  ggtitle("Occupancy Probability by Habitat Type")
 
