@@ -1,11 +1,25 @@
 library(stringr)
 library(ggpubr)
 
+Metadata <- read.csv("data/Acoustics wide array data input_KSWS_20240904.csv")
+head(Metadata)
+
+# Plot UTM coordinates with labels
+ggplot(Metadata, aes(x = UTM.E, y = UTM.N, label = Plot)) +
+  geom_point(color = "blue", size = 3) +
+  geom_text(vjust = -1, color = "black") +
+  labs(x = "UTM Easting", y = "UTM Northing", title = "UTM Coordinate Plot with Labels") +
+  theme_minimal()
+
+
+Metadata <- Metadata[,c("Plot", "Unit.name" ,"Habitat.type" )]
+
+
 KSWSFiles <- list.files("C:/Users/djc426/Desktop/KSWS_WA_trial/gibbons", pattern = '.txt', recursive=T, full.names=T)
 length(KSWSFiles)
 
 KSWSFilesCombined <- data.frame()
-for(a in 1:length(KSWSFiles) ){
+for(a in 3002:length(KSWSFiles) ){
   print(a)
   TempFile <- read.delim(KSWSFiles[a])
   TempName <- basename(KSWSFiles[a])
@@ -16,40 +30,39 @@ for(a in 1:length(KSWSFiles) ){
 
 write.csv(KSWSFilesCombined,'data/KSWSFilesCombined_gibbons.csv',row.names = F)
 
-Metadata <- read.csv("C:/Users/djc426/Desktop/KSWS_WA_trial/Acoustics wide array data input_KSWS_20240904.csv")
-head(Metadata)
 
-# Plot UTM coordinates with labels
-ggplot(Metadata, aes(x = UTM.E, y = UTM.N, label = Plot)) +
-  geom_point(color = "blue", size = 3) +
-  geom_text(vjust = -1, color = "black") +
-  labs(x = "UTM Easting", y = "UTM Northing", title = "UTM Coordinate Plot with Labels") +
-  theme_minimal()
+KSWSFilesCombinedSubset <- subset(KSWSFilesCombined,Common.Name !='nocall' & Confidence >= 0.95)
+write.csv(KSWSFilesCombinedSubset,'data/KSWSFilesCombinedSubset_gibbons.csv',row.names = F)
 
-Metadata <- Metadata[,c("Plot", "Unit.name" ,"Habitat.type" )]
-KSWSFilesCombined <- subset(KSWSFilesCombined,Common.Name !='nocall' & Confidence >= 0.95)
-table(KSWSFilesCombined$Species.Code)
-hist(KSWSFilesCombined$Confidence)
+table(KSWSFilesCombinedSubset$Species.Code)
+hist(KSWSFilesCombinedSubset$Confidence)
 
-TempVals <-str_split_fixed(KSWSFilesCombined$TempName,pattern='_',n=6)
+TempVals <-str_split_fixed(KSWSFilesCombinedSubset$TempName,pattern='_',n=6)
 
-KSWSFilesCombined$Recorder <- TempVals[,3]
-KSWSFilesCombined$Date <- TempVals[,5]
-KSWSFilesCombined$Hour <- substr(TempVals[,6],1,2)
+KSWSFilesCombinedSubset$Recorder <- TempVals[,3]
+KSWSFilesCombinedSubset$Date <- TempVals[,5]
+KSWSFilesCombinedSubset$Hour <- substr(TempVals[,6],1,2)
 
-KSWSFilesCombined$Month <- as.numeric(substr(KSWSFilesCombined$Date,5,6))
-KSWSFilesCombined$Hour <- as.numeric((KSWSFilesCombined$Hour))
+KSWSFilesCombinedSubset$Month <- as.numeric(substr(KSWSFilesCombinedSubset$Date,5,6))
+KSWSFilesCombinedSubset$Hour <- as.numeric((KSWSFilesCombinedSubset$Hour))
 
-KSWSFilesCombined$Plot <- str_split_fixed(KSWSFilesCombined$Recorder, pattern = '-',n=2)[,2]
+KSWSFilesCombinedSubset$Plot <- str_split_fixed(KSWSFilesCombinedSubset$Recorder, pattern = '-',n=2)[,2]
 
-KSWSFilesCombined <- merge(KSWSFilesCombined,Metadata,"Plot")
+KSWSFilesCombinedSubset <- merge(KSWSFilesCombinedSubset,Metadata,"Plot")
 
-KSWSFilesCombined$Habitat.type <- plyr::revalue(KSWSFilesCombined$Habitat.type,
+KSWSFilesCombinedSubset$Habitat.type <- plyr::revalue(KSWSFilesCombinedSubset$Habitat.type,
               c('2'= 'Evergreen',
               '3' = 'DDF'))
 
-ggpubr::gghistogram(data=KSWSFilesCombined,x='Month', facet.by="Common.Name",stat="count")
+ggpubr::gghistogram(data=KSWSFilesCombinedSubset,x='Month', facet.by="Common.Name",stat="count")
 
-ggpubr::gghistogram(data=KSWSFilesCombined,x='Hour',stat="count",facet.by="Common.Name")+xlim(0,24)
-ggpubr::gghistogram(data=KSWSFilesCombined,x='Hour', facet.by='Plot', 
+ggpubr::gghistogram(data=KSWSFilesCombinedSubset,x='Hour',stat="count",facet.by="Common.Name")+xlim(0,24)
+ggpubr::gghistogram(data=KSWSFilesCombinedSubset,x='Hour', facet.by='Plot', 
                     fill="Habitat.type",stat="count")+xlim(0,24)
+
+
+KSWSFilesCombinedSubset$Date <- as.Date(KSWSFilesCombinedSubset$Date, format = "%Y%m%d")
+ggpubr::gghistogram(data=KSWSFilesCombinedSubset,x='Date', #facet.by='Plot', 
+                    fill="Habitat.type",stat="count")
+
+
