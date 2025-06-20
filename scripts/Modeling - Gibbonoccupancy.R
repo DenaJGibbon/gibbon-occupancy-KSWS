@@ -24,6 +24,10 @@ DetectionSummaryGibbon <-
 DetectionSummaryGibbon45Days <- subset(DetectionSummaryGibbon, Date >= "2024-04-06" & Date <= "2024-07-23")
 table(DetectionSummaryGibbon45Days$Date)
 
+# Stop before monsoon
+# DetectionSummaryGibbon45Days <- subset(DetectionSummaryGibbon, Date >= "2024-05-01" & Date <= "2024-06-01")
+# table(DetectionSummaryGibbon45Days$Date)
+
 # Convert number of detections to binary
 DetectionSummaryGibbon45Days$DetectNum <-
   ifelse(DetectionSummaryGibbon45Days$GibbonPresent==TRUE,1,0)
@@ -187,7 +191,7 @@ ggline(data=pred,x = "rain", y = "Predicted",
 # Occupancy vs number of consecutive survey days --------------------------------------
 DetectionSummaryGibbon <- DetectionSummaryGibbon45Days
 
-nsurvey.days <- 1:20
+nsurvey.days <- 1:40
 nsurveys <- 3
 
 OccupancyDF <- data.frame()
@@ -210,6 +214,10 @@ for(b in 1:10){
     start_index <- which(all_dates == random_start)
 
     # Step 3: Generate non-consecutive indices (every nth day)
+    # step_size <- nsurvey.days[a]
+    # subsample_indices <- seq(start_index, length(all_dates), by = step_size)[1:nsurveys]
+    #
+    # Try consecutive days
     step_size <- nsurvey.days[a]
     subsample_indices <- seq(start_index, length(all_dates), by = step_size)[1:nsurveys]
     if(length(na.omit(subsample_indices)) >= nsurveys){

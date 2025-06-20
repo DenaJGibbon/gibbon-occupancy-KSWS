@@ -1,17 +1,86 @@
 library(unmarked)
 library(tidyr)
 library(bbmle)
+library(stringr)
+library(dplyr)
+library(ggpubr)
+library(lubridate)
 
-# Subset data to extract non-detections (Common.Name == 'nocall' or Confidence < 0.95)
-KSWSFilesCombinedNoDetect <- subset(KSWSFilesCombined, Common.Name == 'nocall' | Confidence < 0.99)
+Metadata <- read.csv("data/Acoustics wide array data input_KSWS_20240904.csv")
+head(Metadata)
+
+KSWSFilesCombinedTest <- read.csv('data/KSWSFilesCombined_gibbons.csv')
+nrow(KSWSFilesCombinedTest)
+range(KSWSFilesCombinedTest$Confidence)
+
+KSWSFilesCombinedTest <- subset(KSWSFilesCombinedTest, Confidence > 0.9)
+write.csv(KSWSFilesCombinedTest,
+          'data/KSWSFilesCombined_gibbons_subsetover0.9conf.csv',
+          row.names = FALSE)
+
+# Plot UTM coordinates with labels
+ggplot(Metadata, aes(x = UTM.E, y = UTM.N, label = Plot, color = Habitat.type)) +
+  geom_point( size = 3) +
+  geom_text(vjust = -1, color = "black") +
+  labs(x = "UTM Easting", y = "UTM Northing", title = "") +
+  theme_minimal()
+
+
+Metadata <- Metadata[,c("Plot", "Unit.name" ,"Habitat.type" )]
+
+# Check plot ID
+table(str_split_fixed(KSWSFilesCombinedTest$TempName,pattern = '_',4)[,3])
+
+#Check date
+table(str_split_fixed(KSWSFilesCombinedTest$TempName,pattern = '_',7)[,5])
+
+# Subset data to extract non-detections
+KSWSFilesCombinedNoDetect <- subset(KSWSFilesCombinedTest, Common.Name == 'nocall' | Confidence < 0.95)
 head(KSWSFilesCombinedNoDetect)
 
 # Subset data to extract detections (Common.Name != 'nocall' and Confidence >= 0.95)
-KSWSFilesCombinedDetect <- subset(KSWSFilesCombined, Common.Name != 'nocall' & Confidence >=  0.99)
+KSWSFilesCombinedDetect <- subset(KSWSFilesCombinedTest, Common.Name != 'nocall' & Confidence >=  0.95)
+nrow(KSWSFilesCombinedDetect)
 
-# Add a new column 'Detect' with binary values (0 for no detection, 1 for detection)
 KSWSFilesCombinedNoDetect$Detect <- '0'
 KSWSFilesCombinedDetect$Detect <- '1'
+
+KSWSFilesCombinedDetect$Begin.Path <- str_replace_all(basename(KSWSFilesCombinedDetect$Begin.Path),
+                pattern = "\\\\",
+                replacement = "/")
+
+KSWSFilesCombinedDetect$Begin.Path <- str_replace_all(basename(KSWSFilesCombinedDetect$Begin.Path),
+                                                      pattern = ".flac",
+                                                      replacement = ".wav")
+
+KSWSFilesCombinedDetect$DetectionPath <-paste(KSWSFilesCombinedDetect$Begin.Time..s.,
+      KSWSFilesCombinedDetect$End.Time..s.,
+      KSWSFilesCombinedDetect$Begin.Path ,sep='_')
+
+ShortDetectPaths <-
+  str_split_fixed(Files,'CrestedGibbons_',n=2)[,2]
+
+# Non-matching rows
+# Flag matches
+KSWSFilesCombinedDetect$DetectMatch <- ifelse(   KSWSFilesCombinedDetect$DetectionPath %in% ShortDetectPaths , 1, 0)
+
+# Split into matched and unmatched
+MatchedDetects <- KSWSFilesCombinedDetect %>% filter(DetectMatch == 1)
+UnmatchedDetects <- KSWSFilesCombinedDetect %>% filter(DetectMatch == 0)
+UnmatchedDetects
+
+# Add a new column 'Detect' with binary values (0 for no detection, 1 for detection)
+MatchedDetects$Detect <- '0'
+UnmatchedDetects$Detect <- '1'
+
+MatchedDetects_clean <- MatchedDetects %>% select(-DetectMatch,-DetectionPath)
+
+UnmatchedDetects_clean <- UnmatchedDetects %>% select(-DetectMatch,-DetectionPath)
+
+KSWSFilesCombinedNoDetect <- rbind.data.frame(KSWSFilesCombinedNoDetect,
+                                              UnmatchedDetects_clean)
+
+KSWSFilesCombinedDetect <- MatchedDetects_clean
 
 # Combine the two subsets into a single data frame for occupancy modeling
 GibbonOccupancyModel <- rbind.data.frame(KSWSFilesCombinedNoDetect, KSWSFilesCombinedDetect)
@@ -38,15 +107,32 @@ Plot <- str_split_fixed(Recorder, pattern = '-', n = 2)[, 2]
 # Combine extracted variables into the final GibbonOccupancyModel data frame
 GibbonOccupancyModel <- cbind.data.frame(Plot, Date, Hour, GibbonOccupancyModel)
 
+# Assuming 'Detection' column contains 1 for detected, 0 for not detected
+GibbonOccurrenceModel <- GibbonOccupancyModel %>%
+  mutate(Occurrence = ifelse(Detect == 1, 1, 0))
+
+# Create an unmarkedFrame for occurrence (single visit binary data)
+occurrence_history <- GibbonOccurrenceModel$Occurrence
+umf_occurrence <- unmarkedFrameOccu(y = occurrence_history,
+                                    siteCovs = siteCovs)
+
+# Fit a simple model for occurrence, e.g., using habitat type as a covariate
+occurrence_model <- occu(formula = ~1 ~ Habitat.type, data = umf_occurrence)
+
+# Summary of the occurrence model
+summary(occurrence_model)
+
 # Subset data to include only records within the date range (May 5 to June 18, 2024)
 GibbonOccupancyModel45Days <- subset(GibbonOccupancyModel, Date >= "2024-05-05" & Date <= "2024-06-18")
 
 # Confirm the date range of the final filtered data
 range(GibbonOccupancyModel45Days$Date)
 
-head(GibbonOccupancyModel45Days)
+# Focus on hours with gibbons
+GibbonOccupancyModel45Days$Detect <-
+  ifelse(GibbonOccupancyModel45Days$Hour %in% c(5, 6, 7) & GibbonOccupancyModel45Days$Detect == 1, 1, 0)
 
-library(dplyr)
+head(GibbonOccupancyModel45Days)
 
 # Ensure Detect is numeric
 GibbonOccupancyModel45Days$Detect <- as.numeric(GibbonOccupancyModel45Days$Detect)
@@ -60,62 +146,84 @@ GibbonOccupancyModelByDay <- GibbonOccupancyModel45Days %>%
 head(GibbonOccupancyModelByDay)
 
 # Create BinaryDetect column based on TotalDetect
-GibbonOccupancyModelByDay$BinaryDetect <- 
+GibbonOccupancyModelByDay$BinaryDetect <-
   ifelse(GibbonOccupancyModelByDay$TotalDetect > 0, 1, 0)
 
 # Merge with metadata for Habitat.type
 GibbonOccupancyModelByDay <- merge(GibbonOccupancyModelByDay, Metadata, by = "Plot")
 
 GibbonOccupancyModelByDay$Habitat.type <- plyr::revalue(GibbonOccupancyModelByDay$Habitat.type,
-                               c('2'= 'Evergreen',
-                                 '3' = 'DDF'))
-# Remove duplicates
-GibbonOccupancyModelByDay <- 
-  GibbonOccupancyModelByDay[-which(duplicated(GibbonOccupancyModelByDay)),]
+                                                        c('2'= 'Evergreen',
+                                                          '3' = 'DDF',
+                                                          '5'= 'Grassland'))
 
-# Create the Detection Matrix (using values_fill as a list)
-DetectionMatrix <- GibbonOccupancyModelByDay %>%
-  pivot_wider(names_from = Date, values_from = BinaryDetect, 
+GibbonOccupancyModelByDay <-
+  subset(GibbonOccupancyModelByDay,Habitat.type!='Grassland')
+
+
+GibbonOccupancyModelByDay$Plot_single <- GibbonOccupancyModelByDay$Plot
+GibbonOccupancyModelByDay$Plot <- paste(GibbonOccupancyModelByDay$Plot,
+                                        GibbonOccupancyModelByDay$Habitat.type, sep='_')
+
+ggerrorplot(data=GibbonOccupancyModelByDay,
+            y='BinaryDetect',x='Habitat.type')
+
+# GibbonOccupancyModelByDay <-
+#   GibbonOccupancyModelByDay %>%
+#   mutate(Habitat.type =
+#            if_else(Plot_single %in%
+#                      c("T09","T17",
+#                        "T25","T26",
+#                        "T27","T35"), "Mixed", Habitat.type))
+
+
+table(GibbonOccupancyModelByDay$Habitat.type)
+
+
+# 1. Make sure Date is in Date format
+GibbonOccupancyModelByDay <- GibbonOccupancyModelByDay %>%
+  mutate(Date = as.Date(Date))
+
+# 2. Create a new column for Week number or week start date
+GibbonOccupancyModelByDay <- GibbonOccupancyModelByDay %>%
+  mutate(Week = floor_date(Date, unit = "week", week_start = 1))  # weeks starting on Monday
+
+# 3. Summarize by Plot and Week (binary detect per week: 1 if detected on any day that week)
+WeeklyDetection <- GibbonOccupancyModelByDay %>%
+  group_by(Plot, Week, Habitat.type) %>%
+  summarize(BinaryDetect = as.integer(any(BinaryDetect == 1)), .groups = 'drop')
+
+# 4. Pivot wider into detection matrix
+DetectionMatrixByWeek <- WeeklyDetection %>%
+  pivot_wider(names_from = Week, values_from = BinaryDetect,
               values_fill = list(BinaryDetect = 0))
 
 # Prepare site-level covariates (including Habitat.type)
-siteCovs <- DetectionMatrix %>%
+siteCovs <- DetectionMatrixByWeek %>%
   select(Plot, Habitat.type)  # Selecting only the relevant columns
 
-# Prepare the detection history (remove Plot column)
-y <- DetectionMatrix %>%
-  select(-Plot, -Habitat.type, -TotalDetect, -Unit.name)  # Remove Plot and Habitat.type from y
 
-# Prepare site-level covariates (keep only Plot and Habitat.type)
-siteCovs <- DetectionMatrix %>%
-  select(Plot, Habitat.type)
+# Detection history (columns that are weeks)
+detection_history <- DetectionMatrixByWeek %>%
+  select(-Plot, -Habitat.type)
 
-# Create the unmarked frame
-umf <- unmarkedFrameOccu(y = as.matrix(y), siteCovs = siteCovs)
+umf <- unmarkedFrameOccu(y = detection_history,
+                         siteCovs = siteCovs)
 
-# Fit the occupancy model
-occ_model <- occu(~1 ~ Habitat.type, data = umf)
+model_without_covs <- occu(~1 ~ 1 , data = umf)
+summary(model_without_covs)
 
-# View the model output
-summary(occ_model)
-plot(occ_model)
+model_with_covs <- occu(~1 ~ Habitat.type , data = umf)
+summary(model_with_covs)
 
-# Fit the null model (no covariates for both detection and occupancy)
-null_model <- occu(~1 ~1, data = umf)
-
-# View the null model output
-summary(null_model)
-
-# AIC comparison will provide you with the AIC values for both models
-# Lower AIC indicates a better fit
-fl <- fitList(Null=null_model, occ_model)
+fl <- fitList(Null=model_without_covs, model_with_covs)
 fl
 
 ms <- modSel(fl, nullmod="Null")
 ms
 
 # Extract predicted occupancy probabilities from your model
-predictions <- predict(occ_model, type = "state")  # Occupancy probabilities
+predictions <- predict(model_with_covs, type = "state")  # Occupancy probabilities
 predictions <- cbind.data.frame(predictions,siteCovs)
 
 # Plot the occupancy probabilities for each habitat type
@@ -125,4 +233,22 @@ ggplot(predictions, aes(x = Habitat.type, y = Predicted )) +
   labs(x = "Habitat Type", y = "Estimated Occupancy Probability") +
   theme_minimal() +
   ggtitle("Occupancy Probability by Habitat Type")
+
+
+# Get predicted detection probabilities
+detection_predictions <- predict(model_with_covs, type = "det", se = TRUE)
+detection_predictions <- cbind.data.frame(detection_predictions,siteCovs)
+head(detection_predictions)
+
+# Plot detection probabilities with confidence intervals
+ggplot(detection_predictions, aes(x = Habitat.type, y = Predicted)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  labs(
+    x = "Habitat Type",
+    y = "Predicted Detection Probability",
+    title = "Predicted Detection Probability by Habitat Type"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
