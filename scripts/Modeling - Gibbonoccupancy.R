@@ -21,7 +21,8 @@ DetectionSummaryGibbon <-
   read.csv('data/DetectionSummaryGibbon.csv')
 
 # Subset based on time frame when have > 20 units running
-DetectionSummaryGibbon45Days <- subset(DetectionSummaryGibbon, Date >= "2024-04-06" & Date <= "2024-07-23")
+table(DetectionSummaryGibbon$Date)
+DetectionSummaryGibbon45Days <- subset(DetectionSummaryGibbon, Date >= "2024-04-23" & Date <= "2024-07-23")
 table(DetectionSummaryGibbon45Days$Date)
 
 # Stop before monsoon
@@ -49,6 +50,9 @@ rowSums( table(DetectionSummaryGibbon45Days$Plot,
 #Remove T38 because only have one day
 DetectionSummaryGibbon45Days <-
   subset(DetectionSummaryGibbon45Days, Plot!='T38')
+
+
+# Occupancy for extended survey - habitat effects -------------------------
 
 # Step 3: Get dimensions
 R <- length(unique(DetectionSummaryGibbon45Days$Plot))  # number of sites
@@ -191,11 +195,12 @@ ggline(data=pred,x = "rain", y = "Predicted",
 # Occupancy vs number of consecutive survey days --------------------------------------
 DetectionSummaryGibbon <- DetectionSummaryGibbon45Days
 
-nsurvey.days <- 1:40
-nsurveys <- 3
+nsurvey.days <- 1:21
+nsurveys <- 2
 
 OccupancyDF <- data.frame()
-for(b in 1:10){
+
+for(b in 1:20){
   for(a in 1:length(nsurvey.days)){
     # Ensure Date is in Date format
     DetectionSummaryGibbon$Date <- as.Date(DetectionSummaryGibbon$Date)
@@ -282,9 +287,10 @@ for(b in 1:10){
       fmsummary <- (summary(fm))
       RainDetect <- fmsummary$det$Estimate[2]
       RainDetectSE <- fmsummary$det$SE[2]
+      BaselineDetect <- plogis(fmsummary$det$Estimate[1])  # intercept only
       Occupancy <- plogis(fmsummary$state$Estimate)
       OccupancySE <- fmsummary$state$SE
-      psi_pred <- cbind.data.frame(RainDetect,RainDetectSE,Occupancy,OccupancySE)
+      psi_pred <- cbind.data.frame(RainDetect,RainDetectSE,Occupancy,OccupancySE,BaselineDetect)
       # Add metadata for tracking
       psi_pred$nsurveydays <- step_size
       psi_pred$random <- b
@@ -329,4 +335,13 @@ ggerrorplot(data = OccupancyDF,
     plot.title = element_text(hjust = 0.5),
     text = element_text(size = 12)
   )
+
+ggplot(OccupancyDF, aes(x = nsurveydays, y = Occupancy)) +
+  geom_point(alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", color = "black", size = 2) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.3) +
+  geom_smooth(method = "loess", se = TRUE, span = 0.5, color = "blue", linetype = "solid") +
+  labs(title = "Occupancy (ψ) vs Survey Length",
+       x = "Replicate Length (days)", y = "Initial Occupancy (ψ)") +
+  theme_minimal()
 

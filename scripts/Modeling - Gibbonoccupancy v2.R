@@ -12,7 +12,7 @@ num_surveys_vec <- 3:10        # number of replicate surveys
 
 OccupancyDF <- data.frame()
 
-for (b in 1:10) {  # bootstrap replicate
+for (b in 1:50) {  # bootstrap replicate
   for (nsurvey_days in survey_lengths) {
     for (nsurveys in num_surveys_vec) {
 
@@ -223,4 +223,112 @@ ggplot(avg_p, aes(x = nsurvey_days, y = mean_p)) +
        x = "Number of Survey Days", y = "Detection Probability") +
   theme_minimal()
 
+
+# Asymptote detection prob by number of surveys --------------------------------------------
+
+ggerrorplot(data=OccupancyDF,
+          x='nsurveys',y='BaselineDetect',
+          facet.by = 'nsurvey_days' )
+
+# Average detection probability by number of surveys
+avg_p_surveys <- OccupancyDF %>%
+  group_by(nsurveys) %>%
+  summarise(mean_p = median(BaselineDetect, na.rm = TRUE))
+
+# Fit asymptotic nonlinear model
+fit_surveys <- nls(mean_p ~ a * (1 - exp(-b * nsurveys)), data = avg_p_surveys,
+                   start = list(a = max(avg_p_surveys$mean_p), b = 0.1))
+
+# Extract asymptote and effort to reach 95% of it
+a_s <- coef(fit_surveys)["a"]
+b_s <- coef(fit_surveys)["b"]
+effort_95_s <- -log(1 - 0.95) / b_s
+
+# Plot
+ggplot(avg_p_surveys, aes(x = nsurveys, y = mean_p)) +
+  geom_point() +
+  stat_function(fun = function(x) a_s * (1 - exp(-b_s * x)), color = "blue", size = 1.2) +
+  geom_hline(yintercept = a_s, linetype = "dashed", color = "darkgreen") +
+  geom_vline(xintercept = effort_95_s, linetype = "dotted", color = "red") +
+  labs(title = "Asymptotic Fit of Detection Probability by Number of Surveys",
+       x = "Number of Surveys", y = "Detection Probability") +
+  theme_minimal()
+
+
+# Combined effort ---------------------------------------------------------
+
+library(dplyr)
+library(ggplot2)
+
+# Create a new column for combined effort
+OccupancyDF <- OccupancyDF %>%
+  mutate(total_effort = nsurveys * nsurvey_days)
+
+# Summarize detection by total effort
+effort_summary <- OccupancyDF %>%
+  group_by(total_effort) %>%
+  summarise(
+    mean_detect = mean(BaselineDetect, na.rm = TRUE),
+    se_detect = sd(BaselineDetect, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Fit asymptotic curve to mean detection vs total effort
+fit <- nls(mean_detect ~ a * (1 - exp(-b * total_effort)), data = effort_summary,
+           start = list(a = max(effort_summary$mean_detect), b = 0.1))
+
+a <- coef(fit)["a"]
+b <- coef(fit)["b"]
+effort_95 <- -log(1 - 0.95) / b  # effort to reach 95% of asymptote
+
+# Plot
+ggplot(effort_summary, aes(x = total_effort, y = mean_detect)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_detect - se_detect, ymax = mean_detect + se_detect), width = 0.5) +
+  stat_function(fun = function(x) a * (1 - exp(-b * x)), color = "blue", size = 1.2) +
+  geom_hline(yintercept = a, linetype = "dashed", color = "darkgreen") +
+  geom_vline(xintercept = effort_95, linetype = "dotted", color = "red") +
+  labs(
+    title = "Detection Probability vs Total Survey Effort",
+    subtitle = paste0("95% of asymptote reached at ~", round(effort_95, 1), " effort units"),
+    x = "Total Effort (Survey Length × Number of Surveys)",
+    y = "Detection Probability"
+  ) +
+  theme_minimal()
+
+
+
+# 45 unit/day effort ------------------------------------------------------
+
+# Subset to rows where total effort is between 43 and 47 days
+EffortSubset <- subset(OccupancyDF, nsurvey_days * nsurveys== 45 )
+
+# Optional: add a column showing total effort
+EffortSubset$effort_days <- EffortSubset$nsurvey_days * EffortSubset$nsurveys
+
+EffortSubset <- na.omit(EffortSubset)
+
+# View
+head(EffortSubset)
+
+
+# Is number of simulations enough? ----------------------------------------
+
+library(dplyr)
+library(ggplot2)
+
+# Filter for a specific scenario, e.g., 5 survey days and 3 replicates
+subset_data <- OccupancyDF %>%
+  filter(nsurvey_days == 5, nsurveys == 3) %>%
+  arrange(random) %>%
+  mutate(run = row_number(),
+         running_mean_psi = cummean(Occupancy))
+
+# Plot the running mean
+ggplot(subset_data, aes(x = run, y = running_mean_psi)) +
+  geom_line(color = "blue") +
+  labs(title = "Running Mean of ψ Across Simulations",
+       x = "Simulation #",
+       y = "Running Mean ψ") +
+  theme_minimal()
 
