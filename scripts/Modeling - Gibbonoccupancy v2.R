@@ -3,7 +3,8 @@ library(dplyr)
 library(tidyr)
 library(patchwork)
 
-# Factorial design: vary number of surveys and length of each survey (in consecutive days) ----------------------
+
+#  Factorial design: vary number of surveys and length of each survey (in consecutive days) ---------------------- -------------------------------------------------------------------------
 
 DetectionSummaryGibbon <- DetectionSummaryGibbon45Days
 
