@@ -23,7 +23,7 @@ DetectionSummaryGibbon <-
 
 # Subset based on time frame when have > 20 units running
 table(DetectionSummaryGibbon$Date)
-DetectionSummaryGibbon45Days <- subset(DetectionSummaryGibbon, Date >= "2024-04-05" & Date <= "2024-08-12")
+DetectionSummaryGibbon45Days <- DetectionSummaryGibbon#subset(DetectionSummaryGibbon, Date >= "2024-04-05" & Date <= "2024-08-12")
 table(DetectionSummaryGibbon45Days$Date)
 
 # Stop before monsoon

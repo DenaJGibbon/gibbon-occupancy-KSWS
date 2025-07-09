@@ -1,4 +1,6 @@
-# Load library
+
+# Load library -------------------------------------------------------------------------
+#
 library(dplyr)
 library(readr)
 library(stringr)
@@ -6,6 +8,11 @@ library(readxl)
 library(lubridate)
 library(unmarked)
 library(ggpubr)
+library(plyr)
+library(unmarked)
+
+
+# Read in metadata --------------------------------------------------------
 
 Metadata <- read.csv("data/Acoustics wide array data input_KSWS_20240904.csv")
 head(Metadata)
@@ -13,6 +20,7 @@ Metadata <- Metadata[Metadata$Date.collect != "", ]
 Metadata <- Metadata[,c("Plot", "Unit.name" ,"Habitat.type" )]
 
 
+# Read in effort files ----------------------------------------------------
 Effortcsv <- read.csv('/Volumes/DJC Files/KSWS Gibbon Occupancy/Dep01BirdNETDefaultAnalysisEffort.csv')
 Effortcsv <- as.data.frame(Effortcsv[2:nrow(Effortcsv),])
 colnames(Effortcsv) <- 'AnalysedFiles'
@@ -30,17 +38,26 @@ Effortcsv$Plot <-
   str_split_i(Effortcsv$AnalysedFiles,'_',8)
 
 
-HornbillDetectsKSWS <- read.csv('/Volumes/DJC Files/KSWS Gibbon Occupancy/grehor1/AllKSWSDep01GreatHornbill.csv')
-nrow(HornbillDetectsKSWS)
-range(HornbillDetectsKSWS$Confidence)
+# Read in verified detections ---------------------------------------------
+HornbillDetectsKSWSList <-
+  list.files('/Volumes/DJC Files/KSWS_acoustic/hornbill_detections/Positive/')
+
+HornbillDetectsKSWS <- data.frame(TempName = HornbillDetectsKSWSList)
 
 HornbillDetectsKSWS$Date <-
-  str_split_i(HornbillDetectsKSWS$TempName,'_',5)
+  str_split_i(HornbillDetectsKSWS$TempName,'_',8)
 
 HornbillDetectsKSWS$Date <- as.Date(HornbillDetectsKSWS$Date, format = "%Y%m%d")
 
 HornbillDetectsKSWS$Time <-
- substr(str_split_i(HornbillDetectsKSWS$TempName,'_',6),1,2)
+ substr(str_split_i(HornbillDetectsKSWS$TempName,'_',9),1,2)
+
+HornbillDetectsKSWS$Plot <-
+  str_split_i(HornbillDetectsKSWS$TempName,'_',6)
+
+HornbillDetectsKSWS$Common.Name <- 'Detection'
+
+gghistogram(data=HornbillDetectsKSWS,x='Date')
 
 # Step 1: Merge effort (complete) with detection data (may be missing)
 EffortFull <- merge(Effortcsv, HornbillDetectsKSWS, by = c("Date", "Time", "Plot"), all.x = TRUE)
@@ -61,7 +78,7 @@ DetectionSummary <- EffortFull %>%
 head(DetectionSummary)
 
 
-DetectionSummary45Days <- subset(DetectionSummary, Date >= "2024-05-05" & Date <= "2024-06-05")
+DetectionSummary45Days <-subset(DetectionSummary, Date >= "2024-04-05" & Date <= "2024-06-05")
 
 DetectionSummary45Days$DetectNum <-
 ifelse(DetectionSummary45Days$HornbillPresent==TRUE,1,0)
@@ -72,51 +89,15 @@ ggpubr::ggbarplot(data=DetectionSummary45Days,
 # Merge with metadata for Habitat.type
 DetectionSummary45Days <- merge(DetectionSummary45Days, Metadata, by = "Plot")
 
+DetectionSummary45Days$Habitat.type <- as.factor(DetectionSummary45Days$Habitat.type)
+
 DetectionSummary45Days$Habitat.type <- plyr::revalue(DetectionSummary45Days$Habitat.type,
                                                         c('2'= 'Evergreen',
                                                           '3' = 'DDF',
                                                           '5'= 'Grassland'))
 
-length(unique(DetectionSummary45Days$Date))
-# Fake data
-R <- length(unique(DetectionSummary45Days$Plot)) # number of sites
-J <- length(unique(DetectionSummary45Days$Date)) # number of visits
-y <- matrix(c(
-  1,1,0,
-  0,0,0,
-  1,1,1,
-  1,0,1), nrow=R, ncol=J, byrow=TRUE)
-y
-
-site.covs <- data.frame(x1=1:4, x2=factor(c('A','B','A','B')))
-site.covs
-
-obs.covs <- list(
-  x3 = matrix(c(
-    -1,0,1,
-    -2,0,0,
-    -3,1,0,
-    0,0,0), nrow=R, ncol=J, byrow=TRUE),
-  x4 = matrix(c(
-    'a','b','c',
-    'd','b','a',
-    'a','a','c',
-    'a','b','a'), nrow=R, ncol=J, byrow=TRUE))
-obs.covs
-
-umf <- unmarkedFrameOccu(y=y, siteCovs=site.covs,
-                         obsCovs=obs.covs)   # organize data
-umf                     # look at data
-summary(umf)            # summarize
-fm <- occu(~1 ~1, umf)  # fit a model
-
-
-library(plyr)
-library(unmarked)
-
 DetectionSummary45Days <-
-  droplevels(subset(DetectionSummary45Days,Habitat.type!='Grassland'))
-
+  droplevels(subset(DetectionSummary45Days,Habitat.type != 'Grassland' & Habitat.type != 'Chamka' ))
 
 # Step 3: Get dimensions
 R <- length(unique(DetectionSummary45Days$Plot))  # number of sites
@@ -127,7 +108,7 @@ J <- length(unique(DetectionSummary45Days$Date))  # number of occasions
 # Step 2: Pivot to wide format (rows = Plot, cols = Date)
 y_wide <- DetectionSummary45Days %>%
   select(Plot, Date, DetectNum) %>%
-  pivot_wider(names_from = Date, values_from = DetectNum, values_fill = 0) %>%
+  pivot_wider(names_from = Date, values_from = DetectNum, values_fill = NA) %>%
   arrange(Plot)
 
 # Step 3: Extract detection matrix
@@ -136,17 +117,62 @@ rownames(y) <- y_wide$Plot
 
 site.covs <- DetectionSummary45Days %>%
   select(Plot, Habitat.type) %>%
-  distinct() %>%                           # one row per plot
-  arrange(Plot) %>%                        # match order of y_wide
-  column_to_rownames("Plot")              # set Plot as rownames
+  distinct(Plot, .keep_all = TRUE) %>%
+  arrange(Plot) %>%
+  tibble::column_to_rownames("Plot")
 
-library(unmarked)
 
 umf <- unmarkedFrameOccu(y = y, siteCovs = site.covs)
 
 # Fit null occupancy model (update formula as needed)
-fm <- occu(~1 ~ Habitat.type, umf)
+fm_null <- occu(~1 ~1, umf)
+summary(fm_null)
+
+fm <- occu(~1 ~ Habitat.type , umf)
+summary(fm)
+
+fm_det_by_habitat <- occu(~ Habitat.type ~ Habitat.type, umf)
 
 # View results
-summary(fm)
+summary(fm_det_by_habitat)
+
+fl <- fitList(
+  Null = fm_null,
+  OccOnly = fm,
+  DetByHabitat = fm_det_by_habitat
+)
+
+ms <- modSel(fl, nullmod="Null")
+ms
+
+# Example matrix (replace with your real 'y' matrix if already loaded)
+# If your matrix is called 'y', and is already in wide format (as shown), use this:
+y_long <- y %>%
+  as.data.frame() %>%
+  rownames_to_column("Plot") %>%
+  pivot_longer(-Plot, names_to = "Date", values_to = "Detection")
+
+# Convert date strings to Date format
+y_long$Date <- as.Date(y_long$Date)
+
+# Plot heatmap
+ggplot(y_long, aes(x = Date, y = Plot, fill = factor(Detection))) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  scale_fill_manual(
+    values = c("0" = "gray90", "1" = "steelblue", "NA" = "white"),
+    na.value = "white",
+    name = "Detection",
+    labels = c("No", "Yes")
+  ) +
+  labs(
+    title = "",
+    x = "Date",
+    y = "Plot"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank(),
+    legend.position = "right"
+  )
 
